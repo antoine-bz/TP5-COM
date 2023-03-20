@@ -6,25 +6,20 @@
 // ceil, floor : #include <math.h>
 #include "./include/traces.h" 
 #include "./include/check.h" 
- 
-
-#define isINTREE(i,n)		(i<n)
-#define iPARENT(i) 			(i-1)/2
-#define iLCHILD(i) 			(2*i)+1
-#define iRCHILD(i) 			(2*i)+2
-
-
 
 #define MAXCARS 128
+#define ILASTCAR MAXCARS-1
+#define IMAXCODAGE 16
 
-typedef char T_elt;
-
+typedef unsigned char T_elt;
 
 typedef struct {
 	unsigned int nbElt;
-	unsigned char tree[MAXCARS]; //tableau des caractères
+	T_elt tree[MAXCARS]; //tableau des caractères
 	int data[2*MAXCARS-1]; //tableau des occurences
 	int huffmanTree[2*MAXCARS -1];
+	//on veut maintenant stocker
+	char codage[MAXCARS][IMAXCODAGE];
 } T_indirectHeap;
 
 
@@ -32,34 +27,37 @@ typedef struct {
 #define iPARENT(i) 			(i-1)/2
 #define iLCHILD(i) 			(2*i)+1
 #define iRCHILD(i) 			(2*i)+2
-#define isLEAF(i,n) 			(2*i>=(n-1))
+#define isLEAF(i,n) 		(2*i>=(n-1))
 #define isINTREE(i,n)		(i<n)
-#define isROOT(i)				(i==0)
+#define isROOT(i)			(i==0)
+#define nbINTERNALS(n) 		n/2
 
 
-#define VALP(pHeap, i)		pHeap->tree[i]		
-#define VAL(heap, i)		heap.tree[i]
+#define TREEP(pHeap, i)		pHeap->tree[i]		
+#define TREE(heap, i)		heap.tree[i]
 #define OCC(heap, i)		heap.data[i]
-#define OCCP(heap, i)		heap->data[i]
+#define VALP(heap, i)		heap->data[i]
 
 //Prototypes
-static void genDotPOT_rec(T_elt t[], int n, int root, FILE *fp); 
-void createDotPOT(T_elt t [], int n, const char *basename); 
-void createDotPOT_rec(T_elt t [], int n, int root, const char *basename, int indent);
+static void genDotPOThuff_rec(T_indirectHeap *p, int root, FILE *fp); 
+static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp);
+void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree); 
 T_indirectHeap * newHeap();
 T_indirectHeap *analyserDocument(char *document);
-void printHeap(T_indirectHeap *);
-void swap(T_indirectHeap *p, int i, int j);
-void siftDown(T_indirectHeap *p, int k);
+void swapTree(T_indirectHeap *p, int i, int j);
+void descendre(T_indirectHeap *p, int k);
 void buildHeapV2(T_indirectHeap *p);//transformerEnMinimierV2
-void initHuffmanTree(int* huffmanTree);
-T_elt removeMin(T_indirectHeap *p);
 void insererMI(T_indirectHeap *p, int e, int occ);
-void addNode(int* , int , int );
 void huffman(char *document);
+void heapSortV2(T_indirectHeap *p);
+void freeHeap(T_indirectHeap *p);
+T_elt extraireMin(T_indirectHeap *p);
+
+void printHeap(T_indirectHeap *);
 void printHuffmanTree(T_indirectHeap *p);
 
-
+void codageHuffman(T_indirectHeap *p);
+void printCodage(T_indirectHeap *p);
 
 
 char * outputPath = "./tp5";
@@ -72,16 +70,18 @@ int main(void) {
 	buildHeapV2(p);
 	printHeap(p);
 	*/
-	huffman("ABRADACABRA");
+	//huffman("ABRADACABRA");
+	huffman("algorithme de huffman pour la compression de chaines");
 	//createDotPOT(p->tree, p->nbElt, "tas");
 	return 0;
 }
 
-int eltCmp(T_elt e1, T_elt e2) {
-	return e1-e2;
-}
 
-
+/**
+ * nom : analyserDocument
+ * but : analyser un document et retourner un tas contenant les caractères et leur 
+ * @return un tas contenant les caractères et leur occurence
+ */
 T_indirectHeap * newHeap(){
 	T_indirectHeap * pAux= (T_indirectHeap *) malloc(sizeof(T_indirectHeap));
 	pAux->nbElt = 0;
@@ -91,10 +91,57 @@ T_indirectHeap * newHeap(){
 	return pAux;
 }
 
+void freeHeap(T_indirectHeap *p){
+	free(p);
+}
 
 
+static void genDotPOThuff_rec(T_indirectHeap *p, int root, FILE *fp){
+	// Attention : les fonction toString utilisent un buffer alloué comme une variable statique 
+	// => elles renvoient toujours la même adresse 
+	// => on ne peut pas faire deux appels à toString dans le même printf()
+	
+	// t : tas
+	// n : taille du tas
+	// root : indice de la racine du sous-arbre à produire
+	// fp : flux correspondant à un fichier ouvert en écriture où écrire le sous-arbre
 
-static void genDotPOT_rec(T_elt t[], int n, int root, FILE *fp){
+	int i = root, i1=-256, i2=-256;
+
+
+	for(int j = 0; j < MAXCARS*2; j++) {
+		if(p->huffmanTree[j] == -i) {
+			fprintf(fp, "\t%d", root);
+			fprintf(fp, " [label = \"%d\"];\n", (root));
+			fprintf(fp, "\t%d",root);
+			fprintf(fp, ":sw -> %d [label= \"0\"];\n", j);
+			if (j <= ILASTCAR)
+				fprintf(fp, "\t%d [label = \"%c\"];\n",j,j);
+			i1 = j;
+		}
+		if(p->huffmanTree[j] == i) {
+			fprintf(fp, "\t%d", root);
+			fprintf(fp, " [label = \"%d\"];\n", (root));
+			fprintf(fp, "\t%d",root);
+			fprintf(fp,":se -> %d [label= \"1\"];\n", j);
+			if (j <= ILASTCAR)
+				fprintf(fp, "\t%d [label = \"%c\"];\n",j,j);
+			i2=j;
+		}
+	}
+	if(i1 != i2) {
+		if(i1 > ILASTCAR)
+			genDotPOThuff_rec(p, i1, fp);
+		if(i2 > ILASTCAR)
+			genDotPOThuff_rec(p, i2, fp);
+	}
+	else 
+		if(i1 >= ILASTCAR)
+			genDotPOThuff_rec(p, i1, fp);
+
+}
+
+static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp){
 	// Attention : les fonction toString utilisent un buffer alloué comme une variable statique 
 	// => elles renvoient toujours la même adresse 
 	// => on ne peut pas faire deux appels à toString dans le même printf()
@@ -106,41 +153,45 @@ static void genDotPOT_rec(T_elt t[], int n, int root, FILE *fp){
 
 	// ordre de récurrence  ?
 
+	//printHeap(p);
+
+	int n = p->nbElt;
+
 	// cas de base 
-	if(!isINTREE(root,n)) return;
+	if(!isINTREE(root,n))return;
 
 	// cas général 
 	fprintf(fp, "\t%d",root); 
-    fprintf(fp, " [label = \"%d\"];\n",(t[root]));
+    fprintf(fp, " [label = <%c<BR/><FONT POINT-SIZE=\"10\">%d</FONT>>];\n",TREEP(p,root),VALP(p,TREEP(p,root)));
     if ( !isINTREE(iRCHILD(root),n) && !isINTREE(iLCHILD(root),n)) {
         fprintf(fp, "\t%d", root); 
-		fprintf(fp, " [label = \"%c\"];\n", (t[root]));
+		fprintf(fp, " [label = <%c<BR/><FONT POINT-SIZE=\"10\">%d</FONT>>];\n",TREEP(p,root),VALP(p,TREEP(p,root)));
 	}
     else if (!isINTREE(iRCHILD(root),n)) {
         fprintf(fp, "\t%d", root);
-		fprintf(fp, " [label = \"%d\"];\n", (t[root]));
+		fprintf(fp, " [label = <%c<BR/><FONT POINT-SIZE=\"10\">%d</FONT>>];\n",TREEP(p,root),VALP(p,TREEP(p,root)));
 	}
 	else if (!isINTREE(iLCHILD(root),n)) {
         fprintf(fp, "\t%d",root);
-		fprintf(fp, " [label = \"%d\"];\n", (t[root]));
+		fprintf(fp, " [label = <%c<BR/><FONT POINT-SIZE=\"10\">%d</FONT>>];\n",TREEP(p,root),VALP(p,TREEP(p,root)));
 	}
 	
     if (isINTREE(iLCHILD(root),n)) {
         fprintf(fp, "\t%d",root);
-		fprintf(fp, ":sw -> %d;\n", iLCHILD(root));
-		genDotPOT_rec(t,n,iLCHILD(root),fp);
+		fprintf(fp, ":sw -> %d [arrowhead = \"none\"];\n", iLCHILD(root));
+		genDotPOTtree_rec(p,iLCHILD(root),fp);
     }
 
     if (isINTREE(iRCHILD(root),n)) {
         fprintf(fp, "\t%d",root);
-		fprintf(fp,":se -> %d;\n", iRCHILD(root));
-		genDotPOT_rec(t,n,iRCHILD(root),fp);
+		fprintf(fp,":se -> %d [arrowhead = \"none\"];\n", iRCHILD(root));
+		genDotPOTtree_rec(p,iRCHILD(root),fp);
     }
 
 }
 
 
-void createDotPOT(T_elt t [], int n,const char *basename) {
+void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree) {
 	static char oldBasename[FILENAME_MAX + 1] = "";
 	static unsigned int noVersion = 0;
 
@@ -192,21 +243,25 @@ void createDotPOT(T_elt t [], int n,const char *basename) {
 	"\tnode [\n"
 		"\t\tfontname  = \"Arial bold\" \n"
 		"\t\tfontsize  = \"14\"\n"
-		"\t\tfontcolor = \"red\"\n"
+		"\t\tfontcolor = \"black\"\n"
 		"\t\tstyle     = \"rounded, filled\"\n"
 		"\t\tshape     = \"circle\"\n"
 		"\t\tfillcolor = \"grey90\"\n"
-		"\t\tcolor     = \"blue\"\n"
+		"\t\tcolor     = \"black\"\n"
 		"\t\twidth     = \"0.5\"\n"
 		"\t]\n"
 	"\n"
 	"\tedge [\n"
-		"\t\tcolor     = \"blue\"\n"
+		"\t\tcolor     = \"black\"\n"
 	"\t]\n\n"
 	);
 
 
-	genDotPOT_rec(t,n,0,fp);
+	if (huffmanTree == 1)
+		genDotPOThuff_rec(p,p->tree[0],fp);
+	else{
+		genDotPOTtree_rec(p,0,fp);
+	}
 
 	fprintf(fp, "}\n");	
 	fclose(fp);
@@ -217,49 +272,59 @@ void createDotPOT(T_elt t [], int n,const char *basename) {
 	printf("Creation de '%s' et '%s' ... effectuee\n", fnameDot, fnamePng);
 }
 
-
 /**
-* Mi : minimier indirect
-* Ht : arbre de codage de Huffman
-* C1, C2 : caractères extraits
-* Ni : noeud inséré
-
-
-huffman(D)
-  Mi = analyserDocument(D)	// Comptage des occurrences
-  Ht = initHuffmanTree() // Initialisation de l’arbre de codage
-  transformerEnMinimierV2(Mi) // Réorganisation du minimier
-  Pour i = 1 jusque n-1 			
-	C1=extraireMin(Mi) // Extraire et réorganiser
-	C2=extraireMin(Mi) // Extraire et réorganiser
-	AjouterNoeud(Ht,Ni) // Ajout dans l’arbre de codage
-	insererMI(Mi,Ni,VAL(C1)+VAL(C2)) // Insérer et réorganiser
-
+ * nom : huffman
+ * but : créer l'arbre de codage de Huffman
+ * @param document : nom du fichier à analyse
+ * @return : void
 */
-
 void huffman(char *document) {
+	int C1, C2, n, Ni;
+
 	T_indirectHeap *Mi = analyserDocument(document);
-	int C1, C2, n;
-	buildHeapV2(Mi);
+	heapSortV2(Mi);
 
 	printf("Creation de l'arbre...\n");
-	printf("nbElt = %d\n", Mi->nbElt);
-	printHeap(Mi);
+	// printf("nbElt = %d\n", Mi->nbElt);
+	// printHeap(Mi);
 	printf("\n");
+
+	createDotPOT(Mi, "tas",0);
+
 	n= Mi->nbElt;
-	for (int i = 1; i < n-1; i++) {
-		C1 = removeMin(Mi);
-		C2 = removeMin(Mi);
-		Mi->huffmanTree[C2] = -(MAXCARS+i);
-		Mi->huffmanTree[C1] = (MAXCARS+i);
-		insererMI(Mi,(MAXCARS+i), OCCP(Mi,C1) + OCCP(Mi,C2));
+	for (int i = 1; i <= n-1; i++) {
+
+		//extraireTop
+		C1 = extraireMin(Mi);
+
+		//extraireTop
+		C2 = extraireMin(Mi);
+
+		//AjouterNoeud
+		Ni=ILASTCAR+i;
+		Mi->huffmanTree[C1] = -Ni;
+		Mi->huffmanTree[C2] = Ni;
+
+		//insererMI
+		insererMI(Mi,Ni, VALP(Mi,C1) + VALP(Mi,C2));
+
+		// printf("\naffichage de l'arbre après l'insertion du noeud %d\n", Ni);
+		// printHuffmanTree(Mi);
+		// printf("\n\n");
 	}
-	printf("Arbre de codage de Huffman :\n");
-	printHuffmanTree(Mi);
+	createDotPOT(Mi, "huffmanTree",1);
+	codageHuffman(Mi);
+	printCodage(Mi);
+	freeHeap(Mi);
 }
 
 
-
+/**
+ * nom : analyserDocument
+ * but : compter le nombre d'occurences de chaque caractère dans le document et les stocker les données dans les tableaux
+ * @param document : nom du fichier à analyse
+ * @return : T_indirectHeap *Mi
+*/
 T_indirectHeap *analyserDocument(char *document) {
 	T_indirectHeap *Mi = newHeap();
 	int trouve = 0, intC;
@@ -276,74 +341,177 @@ T_indirectHeap *analyserDocument(char *document) {
 			Mi->tree[Mi->nbElt] = document[i];
 			Mi->nbElt++;
 		}
-		OCCP(Mi,intC) ++;
+		VALP(Mi,intC) ++;
 		if (Mi->tree[Mi->nbElt -1] == 9)
-			printf("\n%d\n", Mi->tree[Mi->nbElt -1]);
+			printf("\n%d\n", TREEP(Mi,Mi->nbElt -1));
 		
 	}
 	return Mi;
 }
 
-
+/**
+ * nom : printHeap
+ * but : afficher le contenu du minimier
+ * @param Mi : le minimier
+ * @return void
+*/
 void printHeap(T_indirectHeap *Mi) {
 	printf("Nombre d'éléments : %d\n", Mi->nbElt);
 	for (int i = 0; i < Mi->nbElt; i++) {
-		printf("%d : %d\n", Mi->tree[i], OCCP(Mi, Mi->tree[i]) );
+		printf("%d : %d\n", Mi->tree[i], VALP(Mi, Mi->tree[i]) );
 	}
 }
 
-void swap(T_indirectHeap *p, int i, int j) {
-	T_elt aux = VALP(p,i);
-	VALP(p,i) = VALP(p,j);
-	VALP(p,j) = aux;
+/**
+ * nom : swapTree
+ * but : échanger deux éléments dans l'arbre
+ * @param p : l'arbre
+ * @param i : l'indice de l'élément à échanger
+ * @param j : l'indice de l'élément à échanger
+ * @return void
+*/
+void swapTree(T_indirectHeap *p, int i, int j) {
+	if(i==j) return;
+	T_elt aux = TREEP(p,i);
+	TREEP(p,i) = TREEP(p,j);
+	TREEP(p,j) = aux;
 }
 
-
-void siftDown(T_indirectHeap *p, int k) {
+/**
+ * nom : descendre
+ * but : descendre un élément dans l'arbre
+ * @param p : l'arbre
+ * @param k : l'indice de l'élément à descendre
+ * @return void
+*/
+void descendre(T_indirectHeap *p, int k) {
 	int i, fini =  isLEAF(k,p->nbElt);
 	while (!fini) {
 		i = iLCHILD(k);
-		if (isINTREE(iRCHILD(k), p->nbElt) && OCCP(p,VALP(p,iRCHILD(k))) < OCCP(p,VALP(p,iLCHILD(k))))
+		if (isINTREE(iRCHILD(k), p->nbElt) && VALP(p,TREEP(p,iRCHILD(k))) > VALP(p,TREEP(p,iLCHILD(k))))
 			i = iRCHILD(k);
-		if (OCCP(p,VALP(p,k)) < OCCP(p,VALP(p,i))) 
+		if (VALP(p,TREEP(p,k)) >= VALP(p,TREEP(p,i))) 
 			fini = 1;
+			
 		else {
-			swap(p, k, i);
+			swapTree(p, k, i);
 			k = i;
-			fini = isLEAF(k,p->nbElt);
+			fini = isLEAF(k,p->nbElt); 
 		}
 	}
 }
 
+/**
+ * nom : buildHeap
+ * description : tri le tableau p->tree en utilisant la méthode du tas
+ * @param p : l'arbre
+ * @return void
+*/
 void buildHeapV2(T_indirectHeap * p){
-	for (int i = p->nbElt/2; i >= 0; i--)
-		siftDown(p, i);
+	for (int i = p->nbElt-1; i >= 0; i--)
+		descendre(p, i);
+
+	for (int i = 0 ; i < p->nbElt; i++)
+		descendre(p, i);
 }
 
-T_elt removeMin(T_indirectHeap *p) {
-	swap(p, 0, p->nbElt-1);
+/**
+ * extraireMin
+ * description : extrait le minimum de l'arbre
+ * @param p : l'arbre
+ * @return T_elt : le minimum
+*/
+T_elt extraireMin(T_indirectHeap *p) {
+	T_elt min = TREEP(p,0);
+	swapTree(p, 0, p->nbElt-1);
 	p->nbElt--;
-	siftDown(p, 0);
-	return VALP(p,p->nbElt); 
+	if (p->nbElt > 0)
+		heapSortV2(p);
+	return min;
 }
 
-
+/**
+ * nom : insererMI
+ * description : insère un élément dans le tree et dans le tableau de données
+ * @param p : l'arbre
+ * @param e : l'élément à insérer
+ * @param occ : le nombre d'occurences de l'élément
+ * @return void
+*/
 void insererMI(T_indirectHeap *p, int e, int occ){
-	VALP(p,p->nbElt) = e;
+	TREEP(p,p->nbElt) = e;
 	p->nbElt++;
-	OCCP(p,e) = occ;
-	buildHeapV2(p);
+	VALP(p,e) = occ;
+	heapSortV2(p);
 }
 
+/**
+ * nom : printHuffmanTree
+ * description : affiche l'arbre de codage de Huffman
+ * @param p : l'arbre
+ * @return void
+*/
 void printHuffmanTree(T_indirectHeap *p) {
-	int fini = 0;
-	while (!fini)
-	{
-		for (int i = 0; i < p->nbElt; i++) {
-			if (p->huffmanTree[i] < 0)
-				printf("%d : %d\n", p->tree[i], p->huffmanTree[p->tree[i]]);
-		}
-		fini = 1;
+	printf("Nombre d'éléments : %d\n", p->nbElt);
+	for (int i = 0; i < p->nbElt; i++) {
+		printf("tree %d | data(occ) %d | huff %d\n", p->tree[i], p->data[p->tree[i]], p->huffmanTree[p->tree[i]]);
 	}
-	
+}
+
+void heapSortV2(T_indirectHeap *p) {
+	int taille = p->nbElt;
+	buildHeapV2(p);
+	while (p->nbElt > 1){
+		swapTree(p, 0, p->nbElt-1);
+		p->nbElt--;
+		if (p->nbElt > 0)
+			descendre(p, 0);
+	}
+
+	p->nbElt = taille;
+}
+
+void codageHuffman(T_indirectHeap *p) {
+	//pour chaque charactère, on va créer un arbre de codage de Huffman
+	//on va parcourir l'arbre de codage de Huffman pour trouver le chemin de la racine à la feuille et on va stocker ce chemin dans le tableau codage
+	//dans le tableau bits, on va stocker le codage en forme de tableau de char
+	int j=0,h=0,fini2=0;
+	for (int i = 0; i < ILASTCAR; i++) {
+		if (p->huffmanTree[i] != -256){
+			h=i;
+			j=1;
+			fini2=0;
+			while (!fini2)
+			{
+				if (p->huffmanTree[h]==-256){
+					fini2=1;
+				}
+				else{
+					if (p->huffmanTree[h]<0)
+						p->codage[i][IMAXCODAGE-j] = '0';
+					else
+						p->codage[i][IMAXCODAGE-j] = '1';
+					j++;
+					h = abs(p->huffmanTree[h]);
+				}
+			}
+			p->codage[i][IMAXCODAGE-j] = '\0';
+		}
+	}
+}
+
+
+void printCodage(T_indirectHeap *p) {
+	printf("car : occ | long | bits\n");
+	printf("----+-----+------+------\n");
+
+	for (int i = 0; i < ILASTCAR; i++) {
+		if (p->huffmanTree[i] != -256){
+			printf(" %c  |   %d |      |  ", i, p->data[i]);
+			for (int j = 0; j < IMAXCODAGE; j++)
+				if (p->codage[i][j] != '\0')
+					printf("%c", p->codage[i][j]);
+			printf("\n");
+		}
+	}
 }
