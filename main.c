@@ -2,25 +2,50 @@
 #include <string.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <stdlib.h>
+#include <libgen.h> // basename
 #include <math.h> 
-// ceil, floor : #include <math.h>
-#include "./include/traces.h" 
-#include "./include/check.h" 
+
 
 #define MAXCARS 128
+#define MAXLENGTH 20000
 #define ILASTCAR MAXCARS-1
 #define IMAXCODAGE 16
 
-typedef unsigned char T_elt;
+//Macro-fonctions de debug pour graphviz
+#ifndef DEBUG
+#define CHECK_IF(stat, val, msg)    \
+	if ( (stat) == (val) )          \
+	{                               \
+		perror(msg);                \
+		exit(EXIT_FAILURE);       \
+    }                       
+#else
+#define CHECK_IF(stat, val, msg)    \
+	if ( (stat) == (val) )          \
+	{                               \
+    	perror(msg);                \
+		exit(EXIT_FAILURE);       \
+    }                               \
+    else printf("%s ... OK\n", msg)
+#endif
+
+typedef char T_octet[IMAXCODAGE];
+
+typedef struct {
+	int longueur;
+	T_octet codage;
+} T_codage;
 
 typedef struct {
 	unsigned int nbElt;
-	T_elt tree[MAXCARS]; //tableau des caractères
+	unsigned char tree[MAXCARS]; //tableau des caractères
 	int data[2*MAXCARS-1]; //tableau des occurences
 	int huffmanTree[2*MAXCARS -1];
-	//on veut maintenant stocker
-	char codage[MAXCARS][IMAXCODAGE];
+	T_codage codage[MAXCARS];
 } T_indirectHeap;
+
+
 
 
 //Macro-fonctions
@@ -42,60 +67,69 @@ typedef struct {
 static void genDotPOThuff_rec(T_indirectHeap *p, int root, FILE *fp); 
 static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp);
 void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree); 
+
+
 T_indirectHeap * newHeap();
 T_indirectHeap *analyserDocument(char *document);
 void swapTree(T_indirectHeap *p, int i, int j);
 void descendre(T_indirectHeap *p, int k);
 void buildHeapV2(T_indirectHeap *p);//transformerEnMinimierV2
 void insererMI(T_indirectHeap *p, int e, int occ);
-void huffman(char *document);
+void huffman(char *document, char *output);
 void heapSortV2(T_indirectHeap *p);
-void freeHeap(T_indirectHeap *p);
-T_elt extraireMin(T_indirectHeap *p);
-
-void printHeap(T_indirectHeap *);
-void printHuffmanTree(T_indirectHeap *p);
+unsigned char extraireMin(T_indirectHeap *p);
 
 void codageHuffman(T_indirectHeap *p);
 void printCodage(T_indirectHeap *p);
 
+void encodageDocument(T_indirectHeap *p, char *document, char *buffer);
+int lenFile(char *document);
+void compressionDocument(char filename[FILENAME_MAX], char *document);
+
 
 char * outputPath = "./tp5";
 
-int main(void) {
-	/*
-	char * document = "ABRADACABRA";
-	T_indirectHeap *p = analyserDocument(document);
-	printHeap(p);
-	buildHeapV2(p);
-	printHeap(p);
-	*/
-	//huffman("ABRADACABRA");
-	huffman("algorithme de huffman pour la compression de chaines");
-	//createDotPOT(p->tree, p->nbElt, "tas");
+/*
+Produire un programme prenant un ou deux paramètres :
+    • Lorsque le programme prend deux paramètres, il doit compresser un texte et produire un fichier contenant le texte compressé précédé de l’entête de huffman permettant de le décompresser
+        ◦ paramètre 1 : chemin du fichier à compresser
+        ◦ paramètre 2 : chemin du fichier à produire
+
+Exemple d’appel : huffman.exe ./fichierACompresser ./fichierResultat
+
+    • Lorsque le programme prend un seul paramètre, il s’agit du chemin d’un fichier à décompresser. Le contenu du document décompressé doit s’afficher sur la sortie standard. 
+
+Exemple d’appel : huffman.exe ./fichierADecompresser 
+
+Bien entendu, votre programme doit pouvoir décompresser les fichiers qu’il a lui-même compressé. */
+
+int main(int argc, char *argv[]) {
+	char * buffer = (char *) malloc(sizeof(char) * MAXLENGTH);
+	char * document = (char *) malloc(sizeof(char) * MAXCARS);
+	if (argc ==1){
+		huffman("test.txt", buffer);
+	}
+	if (argc == 3){
+		huffman(argv[1], buffer);
+		compressionDocument(argv[2], buffer);
+	}
+
+	
+
+	
+	// printf("out: %s\n", buffer);
 	return 0;
 }
 
 
+
 /**
- * nom : analyserDocument
- * but : analyser un document et retourner un tas contenant les caractères et leur 
- * @return un tas contenant les caractères et leur occurence
- */
-T_indirectHeap * newHeap(){
-	T_indirectHeap * pAux= (T_indirectHeap *) malloc(sizeof(T_indirectHeap));
-	pAux->nbElt = 0;
-	for (int i = 0; i < 2*MAXCARS -1; i++) {
-		pAux->huffmanTree[i] = -256;
-	}
-	return pAux;
-}
-
-void freeHeap(T_indirectHeap *p){
-	free(p);
-}
-
-
+ * nom : genDotPOTtree_rec
+ * description : génère le fichier dot correspondant à l'arbre de codage de Huffman
+ * @param p : le tas
+ * @param root : indice de la racine du sous-arbre à produire
+ * @param fp : flux correspondant à un fichier ouvert en écriture où écrire le sous-arbre
+*/
 static void genDotPOThuff_rec(T_indirectHeap *p, int root, FILE *fp){
 	// Attention : les fonction toString utilisent un buffer alloué comme une variable statique 
 	// => elles renvoient toujours la même adresse 
@@ -141,6 +175,13 @@ static void genDotPOThuff_rec(T_indirectHeap *p, int root, FILE *fp){
 
 }
 
+/**
+ * nom : genDotPOTtree_rec
+ * description : génère le fichier dot correspondant aux lettres et à leurs fréquences
+ * @param p : le tas
+ * @param root : indice de la racine du sous-arbre à produire
+ * @param fp : flux correspondant à un fichier ouvert en écriture où écrire le sous-arbre
+*/
 static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp){
 	// Attention : les fonction toString utilisent un buffer alloué comme une variable statique 
 	// => elles renvoient toujours la même adresse 
@@ -152,8 +193,6 @@ static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp){
 	// fp : flux correspondant à un fichier ouvert en écriture où écrire le sous-arbre
 
 	// ordre de récurrence  ?
-
-	//printHeap(p);
 
 	int n = p->nbElt;
 
@@ -190,7 +229,14 @@ static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp){
 
 }
 
-
+/**
+ * nom : createDotPOT
+ * description : génère le fichier dot ET PNG correspondant aux arbres
+ * @param p : le tas
+ * @param basename : nom de base du fichier dot et du fichier png
+ * @param huffmanTree : 1 si on veut générer le fichier dot correspondant à l'arbre de Huffman, 0 sinon
+ * @return : void
+*/
 void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree) {
 	static char oldBasename[FILENAME_MAX + 1] = "";
 	static unsigned int noVersion = 0;
@@ -272,22 +318,33 @@ void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree) {
 	printf("Creation de '%s' et '%s' ... effectuee\n", fnameDot, fnamePng);
 }
 
+
+/**
+ * nom : newHeap
+ * description : alloue un tas
+ * @return : le tas alloué
+ */
+T_indirectHeap * newHeap(){
+	T_indirectHeap * pAux= (T_indirectHeap *) malloc(sizeof(T_indirectHeap));
+	pAux->nbElt = 0;
+	for (int i = 0; i < 2*MAXCARS -1; i++) {
+		pAux->huffmanTree[i] = -256;
+	}
+	return pAux;
+}
+
 /**
  * nom : huffman
  * but : créer l'arbre de codage de Huffman
- * @param document : nom du fichier à analyse
+ * @param document : le document à coder
+ * @param output : le fichier de sortie
  * @return : void
 */
-void huffman(char *document) {
+void huffman(char *document, char *output) {
 	int C1, C2, n, Ni;
 
 	T_indirectHeap *Mi = analyserDocument(document);
 	heapSortV2(Mi);
-
-	printf("Creation de l'arbre...\n");
-	// printf("nbElt = %d\n", Mi->nbElt);
-	// printHeap(Mi);
-	printf("\n");
 
 	createDotPOT(Mi, "tas",0);
 
@@ -299,7 +356,6 @@ void huffman(char *document) {
 
 		//extraireTop
 		C2 = extraireMin(Mi);
-
 		//AjouterNoeud
 		Ni=ILASTCAR+i;
 		Mi->huffmanTree[C1] = -Ni;
@@ -307,17 +363,21 @@ void huffman(char *document) {
 
 		//insererMI
 		insererMI(Mi,Ni, VALP(Mi,C1) + VALP(Mi,C2));
-
-		// printf("\naffichage de l'arbre après l'insertion du noeud %d\n", Ni);
-		// printHuffmanTree(Mi);
-		// printf("\n\n");
 	}
+	
 	createDotPOT(Mi, "huffmanTree",1);
+	//Creation du tableau de codage
 	codageHuffman(Mi);
+	//Affichage du tableau de codage
 	printCodage(Mi);
-	freeHeap(Mi);
-}
+	//Decodage du document
+	encodageDocument(Mi, document,output);
 
+	printf("Longueur du code binaire : %d bits\n", lenFile(document)*8);
+	printf("Longueur du code de huffman : %ld bits\n", strlen(output));
+	printf("Ratio de compression : %.2f%%\n", (float)strlen(output)/(lenFile(document)*8)*100);
+	free(Mi);
+}
 
 /**
  * nom : analyserDocument
@@ -326,40 +386,37 @@ void huffman(char *document) {
  * @return : T_indirectHeap *Mi
 */
 T_indirectHeap *analyserDocument(char *document) {
+	FILE *f=fopen(document,"rt");
+    char s[MAXLENGTH];
 	T_indirectHeap *Mi = newHeap();
 	int trouve = 0, intC;
-	for (int i = 0; i < strlen(document) ; i++) {
-		trouve = 0,intC=document[i];
-		// on parcourt le tableau des caractères pour incrémenter le compteur et s'il est présent
-		for (int j=0; j < Mi->nbElt; j++) {
-			if (document[i] == Mi->tree[j]) {
-				trouve = 1;
-				break;
+    
+    while(!feof(f)){
+		fgets(s, MAXLENGTH, f );
+        for (int i = 0; i < strlen(s) ; i++) {			
+			trouve = 0;
+			//On convertit le caractère en entier
+			intC = (int)s[i];
+
+			//On vérifie si le caractère est déjà présent dans le tableau
+			for (int j = 0; j < Mi->nbElt; j++) {
+				if (Mi->tree[j] == intC) {
+					Mi->data[intC]++;
+					trouve = 1;
+					break;
+				}
+			}
+
+			//Si le caractère n'est pas présent dans le tableau, on l'ajoute
+			if (trouve == 0) {
+				Mi->tree[Mi->nbElt] = intC;
+				Mi->data[intC] = 1;
+				Mi->nbElt++;
 			}
 		}
-		if (trouve==0) {
-			Mi->tree[Mi->nbElt] = document[i];
-			Mi->nbElt++;
-		}
-		VALP(Mi,intC) ++;
-		if (Mi->tree[Mi->nbElt -1] == 9)
-			printf("\n%d\n", TREEP(Mi,Mi->nbElt -1));
-		
-	}
+    }
+    fclose(f);
 	return Mi;
-}
-
-/**
- * nom : printHeap
- * but : afficher le contenu du minimier
- * @param Mi : le minimier
- * @return void
-*/
-void printHeap(T_indirectHeap *Mi) {
-	printf("Nombre d'éléments : %d\n", Mi->nbElt);
-	for (int i = 0; i < Mi->nbElt; i++) {
-		printf("%d : %d\n", Mi->tree[i], VALP(Mi, Mi->tree[i]) );
-	}
 }
 
 /**
@@ -372,7 +429,7 @@ void printHeap(T_indirectHeap *Mi) {
 */
 void swapTree(T_indirectHeap *p, int i, int j) {
 	if(i==j) return;
-	T_elt aux = TREEP(p,i);
+	unsigned char aux = TREEP(p,i);
 	TREEP(p,i) = TREEP(p,j);
 	TREEP(p,j) = aux;
 }
@@ -419,10 +476,10 @@ void buildHeapV2(T_indirectHeap * p){
  * extraireMin
  * description : extrait le minimum de l'arbre
  * @param p : l'arbre
- * @return T_elt : le minimum
+ * @return unsigned char : le minimum
 */
-T_elt extraireMin(T_indirectHeap *p) {
-	T_elt min = TREEP(p,0);
+unsigned char extraireMin(T_indirectHeap *p) {
+	unsigned char min = TREEP(p,0);
 	swapTree(p, 0, p->nbElt-1);
 	p->nbElt--;
 	if (p->nbElt > 0)
@@ -446,18 +503,11 @@ void insererMI(T_indirectHeap *p, int e, int occ){
 }
 
 /**
- * nom : printHuffmanTree
- * description : affiche l'arbre de codage de Huffman
+ * nom : heapSort
+ * description : tri le tableau p->tree en utilisant la méthode du tas
  * @param p : l'arbre
  * @return void
 */
-void printHuffmanTree(T_indirectHeap *p) {
-	printf("Nombre d'éléments : %d\n", p->nbElt);
-	for (int i = 0; i < p->nbElt; i++) {
-		printf("tree %d | data(occ) %d | huff %d\n", p->tree[i], p->data[p->tree[i]], p->huffmanTree[p->tree[i]]);
-	}
-}
-
 void heapSortV2(T_indirectHeap *p) {
 	int taille = p->nbElt;
 	buildHeapV2(p);
@@ -471,16 +521,23 @@ void heapSortV2(T_indirectHeap *p) {
 	p->nbElt = taille;
 }
 
+/**
+ * nom : codageHuffman
+ * description : créer le tableau de codage de Huffman
+ * @param p : l'arbre
+ * @return void
+*/
 void codageHuffman(T_indirectHeap *p) {
 	//pour chaque charactère, on va créer un arbre de codage de Huffman
 	//on va parcourir l'arbre de codage de Huffman pour trouver le chemin de la racine à la feuille et on va stocker ce chemin dans le tableau codage
 	//dans le tableau bits, on va stocker le codage en forme de tableau de char
-	int j=0,h=0,fini2=0;
+	int j=0,h=0,l=0,fini2=0;
 	for (int i = 0; i < ILASTCAR; i++) {
 		if (p->huffmanTree[i] != -256){
 			h=i;
 			j=1;
 			fini2=0;
+			p->codage[i].longueur = 0;
 			while (!fini2)
 			{
 				if (p->huffmanTree[h]==-256){
@@ -488,30 +545,106 @@ void codageHuffman(T_indirectHeap *p) {
 				}
 				else{
 					if (p->huffmanTree[h]<0)
-						p->codage[i][IMAXCODAGE-j] = '0';
+						p->codage[i].codage[IMAXCODAGE-j] = '0';
 					else
-						p->codage[i][IMAXCODAGE-j] = '1';
+						p->codage[i].codage[IMAXCODAGE-j] = '1';				
 					j++;
 					h = abs(p->huffmanTree[h]);
 				}
 			}
-			p->codage[i][IMAXCODAGE-j] = '\0';
+			p->codage[i].longueur= j-1;	
+			p->codage[i].codage[IMAXCODAGE-j] = '\0';
+
+			l=0;
+			for (int k = p->codage[i].longueur; k > 0; k--){
+				p->codage[i].codage[l] = p->codage[i].codage[IMAXCODAGE-k];
+				p->codage[i].codage[IMAXCODAGE-k] = '\0';
+				l++;
+			}
+				
 		}
 	}
 }
 
-
+/**
+ * nom : printCodage
+ * description : affiche le tableau de codage de Huffman
+ * @param p : l'arbre
+ * @return void
+*/
 void printCodage(T_indirectHeap *p) {
-	printf("car : occ | long | bits\n");
+	printf("\ncar : occ | long | bits\n");
 	printf("----+-----+------+------\n");
 
 	for (int i = 0; i < ILASTCAR; i++) {
 		if (p->huffmanTree[i] != -256){
-			printf(" %c  |   %d |      |  ", i, p->data[i]);
-			for (int j = 0; j < IMAXCODAGE; j++)
-				if (p->codage[i][j] != '\0')
-					printf("%c", p->codage[i][j]);
+			printf(" %c  |   %d |   %d  | %s", i, p->data[i], p->codage[i].longueur,p->codage[i].codage);
+			
 			printf("\n");
 		}
 	}
+	printf("\n");
+}
+
+/**
+ * nom : encodageDocument
+ * description : décode un document
+ * @param p : l'arbre pour le codage
+ * @param document : le document à décoder
+ * @param buffer : le buffer dans lequel on va stocker le document décodé
+ * @return void
+*/
+void encodageDocument(T_indirectHeap *p, char *document,char *buffer){
+	int car,j;
+	FILE *f=fopen(document,"rt");
+    char s[MAXLENGTH];
+
+	j=0;
+	while (!feof(f))
+	{
+		fgets(s,MAXLENGTH,f);
+		for (int i = 0; i < strlen(s); i++){
+			car = s[i];
+			for (int k = 0; k < p->codage[car].longueur; k++){
+				buffer[j] = p->codage[car].codage[k];
+				j++;
+			}
+		}
+	}
+	fclose(f);		
+}
+
+/**
+ * nom : lenFile
+ * description : calcule le nombre de caractères d'un fichier
+ * @param document : le document à calculer
+ * @return int : la longueur du fichier
+*/
+int lenFile(char *document){
+	int j;
+	FILE *f=fopen(document,"rt");
+	char s[MAXLENGTH];
+
+	j=0;
+	while (!feof(f))
+	{
+		fgets(s,MAXLENGTH,f);
+		for (int i = 0; i < strlen(s); i++)j++;
+	}
+	fclose(f);	
+	return j;
+}
+
+/**
+ * nom : compressionDocument
+ * description : compresser dans un fichier le document
+ * @param filename : chemin du fichier à produire
+ * @param document : le document compressé
+ * @return void
+*/
+void compressionDocument(char filename[FILENAME_MAX], char *document){
+	// on verifie si le fichier existe sinon on le crée
+	FILE *f = fopen(filename, "wt");
+	fprintf(f, "%s", document);
+	fclose(f);
 }
