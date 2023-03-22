@@ -8,7 +8,7 @@
 
 
 #define MAXCARS 128
-#define MAXLENGTH 20000
+#define MAXLENGTH 200000
 #define ILASTCAR MAXCARS-1
 #define IMAXCODAGE 16
 
@@ -42,7 +42,7 @@ typedef struct {
 	unsigned char tree[MAXCARS]; //tableau des caractères
 	int data[2*MAXCARS-1]; //tableau des occurences
 	int huffmanTree[2*MAXCARS -1];
-	T_codage codage[MAXCARS];
+	T_codage codage[MAXCARS]; //tableau des codages binaire
 } T_indirectHeap;
 
 
@@ -84,39 +84,33 @@ void printCodage(T_indirectHeap *p);
 
 void encodageDocument(T_indirectHeap *p, char *document, char *buffer);
 int lenFile(char *document);
-void compressionDocument(char filename[FILENAME_MAX], char *document);
+void ecrireDocument(char filename[FILENAME_MAX], char *document);
+void compressionDocument(char filename[FILENAME_MAX], char output[FILENAME_MAX]);
+void decompressionDocument(char filename[FILENAME_MAX]);
 
 
 char * outputPath = "./tp5";
 
-/*
-Produire un programme prenant un ou deux paramètres :
-    • Lorsque le programme prend deux paramètres, il doit compresser un texte et produire un fichier contenant le texte compressé précédé de l’entête de huffman permettant de le décompresser
-        ◦ paramètre 1 : chemin du fichier à compresser
-        ◦ paramètre 2 : chemin du fichier à produire
 
-Exemple d’appel : huffman.exe ./fichierACompresser ./fichierResultat
-
-    • Lorsque le programme prend un seul paramètre, il s’agit du chemin d’un fichier à décompresser. Le contenu du document décompressé doit s’afficher sur la sortie standard. 
-
-Exemple d’appel : huffman.exe ./fichierADecompresser 
-
-Bien entendu, votre programme doit pouvoir décompresser les fichiers qu’il a lui-même compressé. */
 
 int main(int argc, char *argv[]) {
-	char * buffer = (char *) malloc(sizeof(char) * MAXLENGTH);
-	char * document = (char *) malloc(sizeof(char) * MAXCARS);
-	if (argc ==1){
-		huffman("test.txt", buffer);
+	if (argc == 3 || argc == 2) {
+		//on verifie si le fichier source existe
+		FILE *f = fopen(argv[1], "r");
+		if (f == NULL) {
+			printf("Le fichier source n'existe pas\n");
+			return 0;
+		}
+		else if (argc == 3) {
+			compressionDocument(argv[1], argv[2]);
+		}
+		else {
+			decompressionDocument(argv[1]);
+		}
+		
+		fclose(f);
+		
 	}
-	if (argc == 3){
-		huffman(argv[1], buffer);
-		compressionDocument(argv[2], buffer);
-	}
-
-	
-
-	
 	// printf("out: %s\n", buffer);
 	return 0;
 }
@@ -373,8 +367,8 @@ void huffman(char *document, char *output) {
 	//Decodage du document
 	encodageDocument(Mi, document,output);
 
-	printf("Longueur du code binaire : %d bits\n", lenFile(document)*8);
-	printf("Longueur du code de huffman : %ld bits\n", strlen(output));
+	printf("Longueur du code binaire : %d bits \n", lenFile(document)*8);
+	printf("Longueur du code de huffman : %ld bits \n", strlen(output));
 	printf("Ratio de compression : %.2f%%\n", (float)strlen(output)/(lenFile(document)*8)*100);
 	free(Mi);
 }
@@ -466,9 +460,6 @@ void descendre(T_indirectHeap *p, int k) {
 */
 void buildHeapV2(T_indirectHeap * p){
 	for (int i = p->nbElt-1; i >= 0; i--)
-		descendre(p, i);
-
-	for (int i = 0 ; i < p->nbElt; i++)
 		descendre(p, i);
 }
 
@@ -636,15 +627,69 @@ int lenFile(char *document){
 }
 
 /**
- * nom : compressionDocument
+ * nom : ecrireDocument
  * description : compresser dans un fichier le document
  * @param filename : chemin du fichier à produire
  * @param document : le document compressé
  * @return void
 */
-void compressionDocument(char filename[FILENAME_MAX], char *document){
+void ecrireDocument(char filename[FILENAME_MAX], char *document){
 	// on verifie si le fichier existe sinon on le crée
-	FILE *f = fopen(filename, "wt");
-	fprintf(f, "%s", document);
+	FILE *f = fopen(filename, "wb");
+	 int i;
+    for (i = 0; i < strlen(document); i += 8) {  // parcours la chaîne de codage par groupes de 8 caractères (octets)
+        char byte_str[9] = {0};  // chaîne de caractères pour stocker un octet binaire
+        int j;
+        for (j = 0; j < 8; j++) {
+            byte_str[j] = document[i+j];  // copie les 8 caractères dans la chaîne de l'octet
+        }
+        unsigned char byte = strtol(byte_str, NULL, 2);  // conversion de la chaîne binaire en octet
+        fwrite(&byte, sizeof(unsigned char), 1, f);  // écriture de l'octet dans le fichier binaire
+    }
+    
 	fclose(f);
+}
+
+/**
+ * nom : compressionDocument
+ * description : compresser un fichier
+ * @param filename : chemin du fichier à compresser
+ * @param output : chemin du fichier à produire
+ * @return void
+*/
+void compressionDocument(char filename[FILENAME_MAX], char output[FILENAME_MAX]){
+	char * buffer = (char *) malloc(sizeof(char) * MAXLENGTH);
+	huffman(filename, buffer);
+	ecrireDocument(output, buffer);
+}
+
+/**
+ * nom : decompressionDocument
+ * description : décompresser un fichier
+ * @param filename : chemin du fichier à décompresser
+ * @return void
+*/
+void decompressionDocument(char filename[FILENAME_MAX]){
+	//on va lire le fichier binaire et on va le décoder
+	//on va afficher le résultat dans la console
+
+	FILE *f=fopen(filename,"rb");
+    unsigned char byte;
+    char binary[9]; // chaine de caractère pour stocker la représentation binaire de chaque byte
+    binary[8] = '\0'; // ajouter un caractère de fin de chaine
+    char* binary_str = malloc(sizeof(char) * (lenFile(filename) * 8 + 1)); // allouer de la mémoire pour stocker la chaine de caractère binaire
+    binary_str[0] = '\0'; // initialiser la chaine de caractère binaire
+
+    while (fread(&byte, sizeof(byte), 1, f) == 1) {
+        for (int i = 7; i >= 0; i--) {
+            binary[i] = (byte & 1) ? '1' : '0'; // convertir chaque bit en caractère binaire ('0' ou '1')
+            byte >>= 1; // décaler le byte de 1 bit vers la droite pour traiter le bit suivant
+        }
+        strcat(binary_str, binary); // ajouter la représentation binaire du byte à la chaine de caractère binaire complète
+    }
+
+    printf("%s\n", binary_str); // afficher la chaine de caractère binaire complète
+
+    fclose(f);
+    free(binary_str);
 }
