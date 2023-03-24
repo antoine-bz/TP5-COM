@@ -74,9 +74,9 @@ T_indirectHeap * newHeap();
 void swapTree(T_indirectHeap *p, int i, int j);
 void descendre(T_indirectHeap *p, int k);
 void buildHeapV2(T_indirectHeap *p);//transformerEnMinimierV2
-void insererMI(T_indirectHeap *p, int e, int occ);
 void heapSortV2(T_indirectHeap *p);
 unsigned char extraireMin(T_indirectHeap *p);
+void insererMI(T_indirectHeap *p, int e, int occ); 
 
 void codageHuffman(T_indirectHeap *p);
 void printCodage(T_indirectHeap *p);
@@ -337,7 +337,7 @@ void huffman(char *document, char *output) {
 		C2 = extraireMin(Mi);
 		//AjouterNoeud
 		Ni=ILASTCAR+i;
-		Mi->huffmanTree[C1] = -Ni;
+		Mi->huffmanTree[C1] = -Ni; 
 		Mi->huffmanTree[C2] = Ni;
 
 		//insererMI
