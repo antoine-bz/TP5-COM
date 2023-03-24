@@ -59,8 +59,6 @@ typedef struct {
 
 
 #define TREEP(pHeap, i)		pHeap->tree[i]		
-#define TREE(heap, i)		heap.tree[i]
-#define OCC(heap, i)		heap.data[i]
 #define VALP(heap, i)		heap->data[i]
 
 //Prototypes
@@ -69,13 +67,14 @@ static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp);
 void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree); 
 
 
-T_indirectHeap * newHeap();
 T_indirectHeap *analyserDocument(char *document);
+void huffman(char *document, char *output);
+
+T_indirectHeap * newHeap();
 void swapTree(T_indirectHeap *p, int i, int j);
 void descendre(T_indirectHeap *p, int k);
 void buildHeapV2(T_indirectHeap *p);//transformerEnMinimierV2
 void insererMI(T_indirectHeap *p, int e, int occ);
-void huffman(char *document, char *output);
 void heapSortV2(T_indirectHeap *p);
 unsigned char extraireMin(T_indirectHeap *p);
 
@@ -107,7 +106,6 @@ int main(int argc, char *argv[]) {
 		else {
 			decompressionDocument(argv[1]);
 		}
-		
 		fclose(f);
 		
 	}
@@ -313,19 +311,6 @@ void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree) {
 }
 
 
-/**
- * nom : newHeap
- * description : alloue un tas
- * @return : le tas alloué
- */
-T_indirectHeap * newHeap(){
-	T_indirectHeap * pAux= (T_indirectHeap *) malloc(sizeof(T_indirectHeap));
-	pAux->nbElt = 0;
-	for (int i = 0; i < 2*MAXCARS -1; i++) {
-		pAux->huffmanTree[i] = -256;
-	}
-	return pAux;
-}
 
 /**
  * nom : huffman
@@ -414,6 +399,20 @@ T_indirectHeap *analyserDocument(char *document) {
 }
 
 /**
+ * nom : newHeap
+ * description : alloue un tas
+ * @return : le tas alloué
+ */
+T_indirectHeap * newHeap(){
+	T_indirectHeap * pAux= (T_indirectHeap *) malloc(sizeof(T_indirectHeap));
+	pAux->nbElt = 0;
+	for (int i = 0; i < 2*MAXCARS -1; i++) {
+		pAux->huffmanTree[i] = -256;
+	}
+	return pAux;
+}
+
+/**
  * nom : swapTree
  * but : échanger deux éléments dans l'arbre
  * @param p : l'arbre
@@ -479,21 +478,6 @@ unsigned char extraireMin(T_indirectHeap *p) {
 }
 
 /**
- * nom : insererMI
- * description : insère un élément dans le tree et dans le tableau de données
- * @param p : l'arbre
- * @param e : l'élément à insérer
- * @param occ : le nombre d'occurences de l'élément
- * @return void
-*/
-void insererMI(T_indirectHeap *p, int e, int occ){
-	TREEP(p,p->nbElt) = e;
-	p->nbElt++;
-	VALP(p,e) = occ;
-	heapSortV2(p);
-}
-
-/**
  * nom : heapSort
  * description : tri le tableau p->tree en utilisant la méthode du tas
  * @param p : l'arbre
@@ -510,6 +494,21 @@ void heapSortV2(T_indirectHeap *p) {
 	}
 
 	p->nbElt = taille;
+}
+
+/**
+ * nom : insererMI
+ * description : insère un élément dans le tree et dans le tableau de données
+ * @param p : l'arbre
+ * @param e : l'élément à insérer
+ * @param occ : le nombre d'occurences de l'élément
+ * @return void
+*/
+void insererMI(T_indirectHeap *p, int e, int occ){
+	TREEP(p,p->nbElt) = e;
+	p->nbElt++;
+	VALP(p,e) = occ;
+	heapSortV2(p);
 }
 
 /**
@@ -670,9 +669,6 @@ void compressionDocument(char filename[FILENAME_MAX], char output[FILENAME_MAX])
  * @return void
 */
 void decompressionDocument(char filename[FILENAME_MAX]){
-	//on va lire le fichier binaire et on va le décoder
-	//on va afficher le résultat dans la console
-
 	FILE *f=fopen(filename,"rb");
     unsigned char byte;
     char binary[9]; // chaine de caractère pour stocker la représentation binaire de chaque byte
