@@ -8,7 +8,7 @@
 
 
 #define MAXCARS 128
-#define MAXLENGTH 200000
+#define MAXLENGTH 2000000 //taille max du fichier
 #define ILASTCAR MAXCARS-1
 #define IMAXCODAGE 16
 
@@ -68,7 +68,7 @@ void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree);
 
 
 T_indirectHeap *analyserDocument(char *document);
-void huffman(char *document, char *output);
+T_indirectHeap * huffman(char *document);
 
 T_indirectHeap * newHeap();
 void swapTree(T_indirectHeap *p, int i, int j);
@@ -83,7 +83,7 @@ void printCodage(T_indirectHeap *p);
 
 void encodageDocument(T_indirectHeap *p, char *document, char *buffer);
 int lenFile(char *document);
-void ecrireDocument(char filename[FILENAME_MAX], char *document);
+void ecrireDocument(T_indirectHeap *p, char filename[FILENAME_MAX], char *document);
 void compressionDocument(char filename[FILENAME_MAX], char output[FILENAME_MAX]);
 void decompressionDocument(char filename[FILENAME_MAX]);
 
@@ -93,23 +93,39 @@ char * outputPath = "./tp5";
 
 
 int main(int argc, char *argv[]) {
-	if (argc == 3 || argc == 2) {
-		//on verifie si le fichier source existe
-		FILE *f = fopen(argv[1], "r");
-		if (f == NULL) {
-			printf("Le fichier source n'existe pas\n");
-			return 0;
-		}
-		else if (argc == 3) {
-			compressionDocument(argv[1], argv[2]);
-		}
-		else {
-			decompressionDocument(argv[1]);
-		}
-		fclose(f);
-		
+	char filename[FILENAME_MAX];
+	char * buffer = (char *) malloc(sizeof(char) * MAXLENGTH*8); // allouer de la mémoire pour stocker le document compressé 
+	T_indirectHeap *p = (T_indirectHeap *) malloc(sizeof(T_indirectHeap)); // allouer de la mémoire pour stocker l'arbre de codage de Huffman
+
+	//Vérification des arguments
+	if(argc == 1){
+		strcpy(filename, "test.txt");
 	}
-	// printf("out: %s\n", buffer);
+	else if(argc == 2){
+		strcpy(filename, argv[1]);
+	}
+
+	//Creation de l'arbre de codage de Huffman
+	p = huffman(filename);
+
+	//Creation du tableau de codage
+	codageHuffman(p);
+
+	//Decodage du document
+	encodageDocument(p, filename,buffer);
+
+	//Affichage de l'arbre de codage de Huffman
+	createDotPOT(p, "huffmanTree",1);
+	
+	//Affichage du tableau de codage
+	printCodage(p);
+
+	printf("Longueur du code binaire : %d bits \n", lenFile(filename)*8);
+	printf("Longueur du code de huffman : %ld bits \n", strlen(buffer));
+	printf("Ratio de compression : %.2f%%\n", (float)strlen(buffer)/(lenFile(filename)*8)*100);
+
+	printf("Le document compressé est :\n%s\n\n", buffer);
+	free(p);
 	return 0;
 }
 
@@ -209,13 +225,13 @@ static void genDotPOTtree_rec(T_indirectHeap *p, int root, FILE *fp){
 	
     if (isINTREE(iLCHILD(root),n)) {
         fprintf(fp, "\t%d",root);
-		fprintf(fp, ":sw -> %d [arrowhead = \"none\"];\n", iLCHILD(root));
+		fprintf(fp, ":sw -> %d ;\n", iLCHILD(root));
 		genDotPOTtree_rec(p,iLCHILD(root),fp);
     }
 
     if (isINTREE(iRCHILD(root),n)) {
         fprintf(fp, "\t%d",root);
-		fprintf(fp,":se -> %d [arrowhead = \"none\"];\n", iRCHILD(root));
+		fprintf(fp,":se -> %d ;\n", iRCHILD(root));
 		genDotPOTtree_rec(p,iRCHILD(root),fp);
     }
 
@@ -311,93 +327,32 @@ void createDotPOT(T_indirectHeap *p,const char *basename, int huffmanTree) {
 }
 
 
-
 /**
- * nom : huffman
- * but : créer l'arbre de codage de Huffman
- * @param document : le document à coder
- * @param output : le fichier de sortie
- * @return : void
+ * nom : lenFile
+ * description : calcule le nombre de caractères d'un fichier
+ * @param document : le document à calculer
+ * @return int : la longueur du fichier
 */
-void huffman(char *document, char *output) {
-	int C1, C2, n, Ni;
-
-	T_indirectHeap *Mi = analyserDocument(document);
-	heapSortV2(Mi);
-
-	createDotPOT(Mi, "tas",0);
-
-	n= Mi->nbElt;
-	for (int i = 1; i <= n-1; i++) {
-
-		//extraireTop
-		C1 = extraireMin(Mi);
-
-		//extraireTop
-		C2 = extraireMin(Mi);
-		//AjouterNoeud
-		Ni=ILASTCAR+i;
-		Mi->huffmanTree[C1] = -Ni; 
-		Mi->huffmanTree[C2] = Ni;
-
-		//insererMI
-		insererMI(Mi,Ni, VALP(Mi,C1) + VALP(Mi,C2));
-	}
+int lenFile(char *document){
+	int compteur = 0;
+	FILE * file;
 	
-	createDotPOT(Mi, "huffmanTree",1);
-	//Creation du tableau de codage
-	codageHuffman(Mi);
-	//Affichage du tableau de codage
-	printCodage(Mi);
-	//Decodage du document
-	encodageDocument(Mi, document,output);
-
-	printf("Longueur du code binaire : %d bits \n", lenFile(document)*8);
-	printf("Longueur du code de huffman : %ld bits \n", strlen(output));
-	printf("Ratio de compression : %.2f%%\n", (float)strlen(output)/(lenFile(document)*8)*100);
-	free(Mi);
+	/* ouverture du fichier */
+	if ((file = fopen(document, "r")) == NULL)
+	perror("Erreur à l'ouverture du fichier");
+	
+	else {
+	/* parcours du fichier */
+	while(fgetc(file) != EOF)
+		compteur ++; /* incrémentation du compteur */
+	}
+		
+	/* fermeture du fichier */
+	fclose(file);
+	return compteur;
 }
 
-/**
- * nom : analyserDocument
- * but : compter le nombre d'occurences de chaque caractère dans le document et les stocker les données dans les tableaux
- * @param document : nom du fichier à analyse
- * @return : T_indirectHeap *Mi
-*/
-T_indirectHeap *analyserDocument(char *document) {
-	FILE *f=fopen(document,"rt");
-    char s[MAXLENGTH];
-	T_indirectHeap *Mi = newHeap();
-	int trouve = 0, intC;
-    
-    while(!feof(f)){
-		fgets(s, MAXLENGTH, f );
-        for (int i = 0; i < strlen(s) ; i++) {			
-			trouve = 0;
-			//On convertit le caractère en entier
-			intC = (int)s[i];
-
-			//On vérifie si le caractère est déjà présent dans le tableau
-			for (int j = 0; j < Mi->nbElt; j++) {
-				if (Mi->tree[j] == intC) {
-					Mi->data[intC]++;
-					trouve = 1;
-					break;
-				}
-			}
-
-			//Si le caractère n'est pas présent dans le tableau, on l'ajoute
-			if (trouve == 0) {
-				Mi->tree[Mi->nbElt] = intC;
-				Mi->data[intC] = 1;
-				Mi->nbElt++;
-			}
-		}
-    }
-    fclose(f);
-	return Mi;
-}
-
+///////////////////////////HEAP////////////////////////////////////
 /**
  * nom : newHeap
  * description : alloue un tas
@@ -460,6 +415,8 @@ void descendre(T_indirectHeap *p, int k) {
 void buildHeapV2(T_indirectHeap * p){
 	for (int i = p->nbElt-1; i >= 0; i--)
 		descendre(p, i);
+	for (int i=0; i < p->nbElt; i++)
+		descendre(p, i);
 }
 
 /**
@@ -511,6 +468,81 @@ void insererMI(T_indirectHeap *p, int e, int occ){
 	heapSortV2(p);
 }
 
+///////////////////////////FONCTIONS DE CODAGE DE HUFFMAN///////////////////////////
+/**
+ * nom : huffman
+ * but : créer l'arbre de codage de Huffman
+ * @param document : le document à coder
+ * @param output : le fichier de sortie
+ * @return : void
+*/
+T_indirectHeap * huffman(char *document) {
+	int C1, C2, n, Ni;
+
+	T_indirectHeap *Mi = analyserDocument(document);
+	heapSortV2(Mi);
+
+	createDotPOT(Mi, "tas",0);
+
+	n= Mi->nbElt;
+	for (int i = 1; i <= n-1; i++) {
+
+		//extraireTop
+		C1 = extraireMin(Mi);
+
+		//extraireTop
+		C2 = extraireMin(Mi);
+		//AjouterNoeud
+		Ni=ILASTCAR+i;
+		Mi->huffmanTree[C1] = -Ni; 
+		Mi->huffmanTree[C2] = Ni;
+
+		//insererMI
+		insererMI(Mi,Ni, VALP(Mi,C1) + VALP(Mi,C2));
+	}
+	return Mi;
+}
+
+/**
+ * nom : analyserDocument
+ * but : compter le nombre d'occurences de chaque caractère dans le document et les stocker les données dans les tableaux
+ * @param document : nom du fichier à analyse
+ * @return : T_indirectHeap *Mi
+*/
+T_indirectHeap *analyserDocument(char *document) {
+	FILE *f=fopen(document,"rt");
+    char s[MAXLENGTH];
+	T_indirectHeap *Mi = newHeap();
+	int trouve = 0, intC;
+    
+    while(!feof(f)){
+		fgets(s, MAXLENGTH, f );
+        for (int i = 0; i < strlen(s) ; i++) {			
+			trouve = 0;
+			//On convertit le caractère en entier
+			intC = (int)s[i];
+
+			//On vérifie si le caractère est déjà présent dans le tableau
+			for (int j = 0; j < Mi->nbElt; j++) {
+				if (Mi->tree[j] == intC) {
+					Mi->data[intC]++;
+					trouve = 1;
+					break;
+				}
+			}
+
+			//Si le caractère n'est pas présent dans le tableau, on l'ajoute
+			if (trouve == 0) {
+				Mi->tree[Mi->nbElt] = intC;
+				Mi->data[intC] = 1;
+				Mi->nbElt++;
+			}
+		}
+    }
+    fclose(f);
+	return Mi;
+}
+
 /**
  * nom : codageHuffman
  * description : créer le tableau de codage de Huffman
@@ -518,7 +550,7 @@ void insererMI(T_indirectHeap *p, int e, int occ){
  * @return void
 */
 void codageHuffman(T_indirectHeap *p) {
-	//pour chaque charactère, on va créer un arbre de codage de Huffman
+	//pour chaque charactère, on va creer une table de codage de Huffman
 	//on va parcourir l'arbre de codage de Huffman pour trouver le chemin de la racine à la feuille et on va stocker ce chemin dans le tableau codage
 	//dans le tableau bits, on va stocker le codage en forme de tableau de char
 	int j=0,h=0,l=0,fini2=0;
@@ -604,88 +636,6 @@ void encodageDocument(T_indirectHeap *p, char *document,char *buffer){
 	fclose(f);		
 }
 
-/**
- * nom : lenFile
- * description : calcule le nombre de caractères d'un fichier
- * @param document : le document à calculer
- * @return int : la longueur du fichier
-*/
-int lenFile(char *document){
-	int j;
-	FILE *f=fopen(document,"rt");
-	char s[MAXLENGTH];
 
-	j=0;
-	while (!feof(f))
-	{
-		fgets(s,MAXLENGTH,f);
-		for (int i = 0; i < strlen(s); i++)j++;
-	}
-	fclose(f);	
-	return j;
-}
 
-/**
- * nom : ecrireDocument
- * description : compresser dans un fichier le document
- * @param filename : chemin du fichier à produire
- * @param document : le document compressé
- * @return void
-*/
-void ecrireDocument(char filename[FILENAME_MAX], char *document){
-	// on verifie si le fichier existe sinon on le crée
-	FILE *f = fopen(filename, "wb");
-	 int i;
-    for (i = 0; i < strlen(document); i += 8) {  // parcours la chaîne de codage par groupes de 8 caractères (octets)
-        char byte_str[9] = {0};  // chaîne de caractères pour stocker un octet binaire
-        int j;
-        for (j = 0; j < 8; j++) {
-            byte_str[j] = document[i+j];  // copie les 8 caractères dans la chaîne de l'octet
-        }
-        unsigned char byte = strtol(byte_str, NULL, 2);  // conversion de la chaîne binaire en octet
-        fwrite(&byte, sizeof(unsigned char), 1, f);  // écriture de l'octet dans le fichier binaire
-    }
-    
-	fclose(f);
-}
 
-/**
- * nom : compressionDocument
- * description : compresser un fichier
- * @param filename : chemin du fichier à compresser
- * @param output : chemin du fichier à produire
- * @return void
-*/
-void compressionDocument(char filename[FILENAME_MAX], char output[FILENAME_MAX]){
-	char * buffer = (char *) malloc(sizeof(char) * MAXLENGTH);
-	huffman(filename, buffer);
-	ecrireDocument(output, buffer);
-}
-
-/**
- * nom : decompressionDocument
- * description : décompresser un fichier
- * @param filename : chemin du fichier à décompresser
- * @return void
-*/
-void decompressionDocument(char filename[FILENAME_MAX]){
-	FILE *f=fopen(filename,"rb");
-    unsigned char byte;
-    char binary[9]; // chaine de caractère pour stocker la représentation binaire de chaque byte
-    binary[8] = '\0'; // ajouter un caractère de fin de chaine
-    char* binary_str = malloc(sizeof(char) * (lenFile(filename) * 8 + 1)); // allouer de la mémoire pour stocker la chaine de caractère binaire
-    binary_str[0] = '\0'; // initialiser la chaine de caractère binaire
-
-    while (fread(&byte, sizeof(byte), 1, f) == 1) {
-        for (int i = 7; i >= 0; i--) {
-            binary[i] = (byte & 1) ? '1' : '0'; // convertir chaque bit en caractère binaire ('0' ou '1')
-            byte >>= 1; // décaler le byte de 1 bit vers la droite pour traiter le bit suivant
-        }
-        strcat(binary_str, binary); // ajouter la représentation binaire du byte à la chaine de caractère binaire complète
-    }
-
-    printf("%s\n", binary_str); // afficher la chaine de caractère binaire complète
-
-    fclose(f);
-    free(binary_str);
-}
